@@ -34,3 +34,14 @@ class CameraResponse(BaseModel):
     location_description: Optional[str] = None
     is_active: bool
     created_at: datetime
+
+class SourceCheckResponse(BaseModel):
+    camera_id: int
+    source_type: str
+    source_path: str
+    reachable: Optional[bool] = None
+    message: str
+    width: Optional[int] = None
+    height: Optional[int] = None
+    fps: Optional[float] = None
+    frame_count: Optional[int] = None

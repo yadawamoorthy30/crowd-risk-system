@@ -1,0 +1,7 @@
+dataset/**/*.mp4
+dataset/**/*.avi
+dataset/**/*.mov
+dataset/**/*.mkv
+dataset/**/*.jpg
+dataset/**/*.jpeg
+dataset/**/*.png
