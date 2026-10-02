@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 
-from app.routers import events, health
+from app.routers import cameras, events, health
 
 app = FastAPI(
     title="Crowd Risk System API",
@@ -10,3 +10,4 @@ app = FastAPI(
 
 app.include_router(health.router)
 app.include_router(events.router)
+app.include_router(cameras.router)
