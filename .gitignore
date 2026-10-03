@@ -5,3 +5,11 @@ dataset/**/*.mkv
 dataset/**/*.jpg
 dataset/**/*.jpeg
 dataset/**/*.png
+
+.venv/
+venv/
+__pycache__/
+*.pyc
+.env
+*.pt
+runs/
