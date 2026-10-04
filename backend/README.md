@@ -16,3 +16,21 @@ pip install -r requirements.txt
 4. Run the server: `uvicorn app.main:app --reload`
 
 API docs: http://127.0.0.1:8000/docs
+
+## Detection (Phase 2)
+
+Download the model once (about 5 MB):
+
+```powershell
+python -c "from ultralytics import YOLO; YOLO('models/yolo26n.pt')"
+```
+
+Visual test with the OpenCV window:
+
+```powershell
+python scripts\run_vision.py --source 0
+python scripts\run_vision.py --imgsz 960
+```
+
+API: `POST /api/detection/start`, `POST /api/detection/stop`, `GET /api/detection/status`,
+`GET /api/detection/results/{camera_id}`, `GET /api/detection/history/{camera_id}`.
