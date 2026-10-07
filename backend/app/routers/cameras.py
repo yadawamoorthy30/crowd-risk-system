@@ -6,7 +6,8 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.camera import Camera
 from app.models.event import Event
-from app.schemas.camera import CameraCreate, CameraResponse, SourceCheckResponse
+from app.models.zone import Zone
+from app.schemas.camera import ActiveZoneUpdate, CameraAreaUpdate, CameraCreate, CameraResponse, SourceCheckResponse
 from app.services.video_source import check_source
 
 router = APIRouter(prefix="/api/cameras", tags=["Cameras"])
@@ -44,3 +45,64 @@ def verify_camera_source(camera_id: int, db: Session = Depends(get_db)):
             detail=f"Camera with id {camera_id} not found",
         )
     return check_source(camera)
+
+@router.put("/{camera_id}/area", response_model=CameraResponse)
+def set_camera_area(
+    camera_id: int, payload: CameraAreaUpdate, db: Session = Depends(get_db)
+):
+    camera = db.get(Camera, camera_id)
+    if camera is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Camera with id {camera_id} not found",
+        )
+
+    area = payload.computed_area()
+    if area <= 0:
+        raise HTTPException(
+            status_code=422,
+            detail="Area is too small: it rounds to 0.00 m²",
+        )
+
+    if payload.area_sqm is not None:
+        camera.area_length_m = None
+        camera.area_width_m = None
+    else:
+        camera.area_length_m = payload.area_length_m
+        camera.area_width_m = payload.area_width_m
+    camera.area_sqm = area
+
+    db.commit()
+    db.refresh(camera)
+    return camera
+
+@router.put("/{camera_id}/active-zone", response_model=CameraResponse)
+def set_active_zone(
+    camera_id: int, payload: ActiveZoneUpdate, db: Session = Depends(get_db)
+):
+    camera = db.get(Camera, camera_id)
+    if camera is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Camera with id {camera_id} not found",
+        )
+
+    if payload.zone_id is None:
+        camera.active_zone_id = None  # back to full-frame mode
+    else:
+        zone = db.get(Zone, payload.zone_id)
+        if zone is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Zone with id {payload.zone_id} not found",
+            )
+        if zone.camera_id != camera.id:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Zone {zone.id} belongs to camera {zone.camera_id}, not camera {camera.id}",
+            )
+        camera.active_zone_id = zone.id
+
+    db.commit()
+    db.refresh(camera)
+    return camera

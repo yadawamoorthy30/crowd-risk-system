@@ -30,12 +30,12 @@ def check_source(camera: Camera) -> dict:
 
     # RTSP: opening an unreachable stream can hang for a long time,
     # so Phase 1 only validates the format (already done at registration).
-    if camera.source_type == SourceType.rtsp:
+    if camera.source_type in (SourceType.RTSP, SourceType.HTTP):
         result["reachable"] = None
-        result["message"] = "RTSP stream opening is not tested in Phase 1"
+        result["message"] = "Network stream opening is not tested yet"
         return result
 
-    if camera.source_type == SourceType.video_file:
+    if camera.source_type == SourceType.FILE:
         path = resolve_video_path(camera.source_path)
         if not path.is_file():
             result["message"] = f"Video file not found: {path}"
@@ -59,7 +59,7 @@ def check_source(camera: Camera) -> dict:
         result["width"] = int(capture.get(cv2.CAP_PROP_FRAME_WIDTH))
         result["height"] = int(capture.get(cv2.CAP_PROP_FRAME_HEIGHT))
         result["fps"] = round(capture.get(cv2.CAP_PROP_FPS), 2)
-        if camera.source_type == SourceType.video_file:
+        if camera.source_type == SourceType.FILE:
             result["frame_count"] = int(capture.get(cv2.CAP_PROP_FRAME_COUNT))
         return result
     finally:

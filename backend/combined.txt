@@ -1,0 +1,215 @@
+﻿# ===== FILE: app\schemas\event.py =====
+from datetime import date, datetime
+from typing import Optional
+
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class EventCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=150)
+    location: str = Field(..., min_length=1, max_length=255)
+    event_date: date
+    description: Optional[str] = None
+
+
+class EventResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    location: str
+    event_date: date
+    description: Optional[str] = None
+    created_at: datetime
+
+# ===== FILE: app\schemas\camera.py =====
+from datetime import datetime
+from typing import Optional
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from app.models.camera import SourceType
+
+
+class CameraCreate(BaseModel):
+    event_id: int = Field(..., gt=0)
+    name: str = Field(..., min_length=1, max_length=100)
+    source_type: SourceType
+    source_path: str = Field(..., min_length=1, max_length=500)
+    location_description: Optional[str] = Field(None, max_length=255)
+    is_active: bool = True
+
+    @model_validator(mode="after")
+    def check_source_path(self):
+        if self.source_type == SourceType.webcam and not self.source_path.isdigit():
+            raise ValueError("For a webcam, source_path must be the camera index, e.g. '0'")
+        if self.source_type == SourceType.rtsp and not self.source_path.lower().startswith("rtsp://"):
+            raise ValueError("For an rtsp camera, source_path must start with rtsp://")
+        return self
+
+
+class CameraResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    event_id: int
+    name: str
+    source_type: SourceType
+    source_path: str
+    location_description: Optional[str] = None
+    is_active: bool
+    created_at: datetime
+
+class SourceCheckResponse(BaseModel):
+    camera_id: int
+    source_type: str
+    source_path: str
+    reachable: Optional[bool] = None
+    message: str
+    width: Optional[int] = None
+    height: Optional[int] = None
+    fps: Optional[float] = None
+    frame_count: Optional[int] = None
+
+# ===== FILE: app\routers\events.py =====
+from typing import List
+
+from fastapi import APIRouter, Depends, status
+from sqlalchemy.orm import Session
+
+from app.database import get_db
+from app.models.event import Event
+from app.schemas.event import EventCreate, EventResponse
+
+router = APIRouter(prefix="/api/events", tags=["Events"])
+
+
+@router.post("", response_model=EventResponse, status_code=status.HTTP_201_CREATED)
+def create_event(payload: EventCreate, db: Session = Depends(get_db)):
+    event = Event(**payload.model_dump())
+    db.add(event)
+    db.commit()
+    db.refresh(event)
+    return event
+
+
+@router.get("", response_model=List[EventResponse])
+def list_events(db: Session = Depends(get_db)):
+    return db.query(Event).order_by(Event.id).all()
+
+# ===== FILE: app\routers\cameras.py =====
+from typing import List, Optional
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+
+from app.database import get_db
+from app.models.camera import Camera
+from app.models.event import Event
+from app.schemas.camera import CameraCreate, CameraResponse, SourceCheckResponse
+from app.services.video_source import check_source
+
+router = APIRouter(prefix="/api/cameras", tags=["Cameras"])
+
+
+@router.post("", response_model=CameraResponse, status_code=status.HTTP_201_CREATED)
+def create_camera(payload: CameraCreate, db: Session = Depends(get_db)):
+    event = db.get(Event, payload.event_id)
+    if event is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Event with id {payload.event_id} not found",
+        )
+
+    camera = Camera(**payload.model_dump())
+    db.add(camera)
+    db.commit()
+    db.refresh(camera)
+    return camera
+
+
+@router.get("", response_model=List[CameraResponse])
+def list_cameras(event_id: Optional[int] = None, db: Session = Depends(get_db)):
+    query = db.query(Camera)
+    if event_id is not None:
+        query = query.filter(Camera.event_id == event_id)
+    return query.order_by(Camera.id).all()
+
+@router.get("/{camera_id}/verify-source", response_model=SourceCheckResponse)
+def verify_camera_source(camera_id: int, db: Session = Depends(get_db)):
+    camera = db.get(Camera, camera_id)
+    if camera is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Camera with id {camera_id} not found",
+        )
+    return check_source(camera)
+
+# ===== FILE: app\services\video_source.py =====
+from pathlib import Path
+
+import cv2
+
+from app.models.camera import Camera, SourceType
+
+# backend/app/services/video_source.py -> project root is 3 levels up
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+
+
+def resolve_video_path(source_path: str) -> Path:
+    path = Path(source_path)
+    if not path.is_absolute():
+        path = PROJECT_ROOT / path
+    return path
+
+
+def check_source(camera: Camera) -> dict:
+    result = {
+        "camera_id": camera.id,
+        "source_type": camera.source_type.value,
+        "source_path": camera.source_path,
+        "reachable": False,
+        "message": "",
+        "width": None,
+        "height": None,
+        "fps": None,
+        "frame_count": None,
+    }
+
+    # RTSP: opening an unreachable stream can hang for a long time,
+    # so Phase 1 only validates the format (already done at registration).
+    if camera.source_type == SourceType.rtsp:
+        result["reachable"] = None
+        result["message"] = "RTSP stream opening is not tested in Phase 1"
+        return result
+
+    if camera.source_type == SourceType.video_file:
+        path = resolve_video_path(camera.source_path)
+        if not path.is_file():
+            result["message"] = f"Video file not found: {path}"
+            return result
+        capture = cv2.VideoCapture(str(path))
+    else:  # webcam
+        capture = cv2.VideoCapture(int(camera.source_path), cv2.CAP_DSHOW)
+
+    try:
+        if not capture.isOpened():
+            result["message"] = "Source exists but could not be opened"
+            return result
+
+        success, _frame = capture.read()
+        if not success:
+            result["message"] = "Source opened but no frame could be read"
+            return result
+
+        result["reachable"] = True
+        result["message"] = "Source opened and a frame was read successfully"
+        result["width"] = int(capture.get(cv2.CAP_PROP_FRAME_WIDTH))
+        result["height"] = int(capture.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        result["fps"] = round(capture.get(cv2.CAP_PROP_FPS), 2)
+        if camera.source_type == SourceType.video_file:
+            result["frame_count"] = int(capture.get(cv2.CAP_PROP_FRAME_COUNT))
+        return result
+    finally:
+        capture.release()
+

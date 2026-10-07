@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models.camera import Camera, SourceType
+from app.models.camera import Camera, CameraStatus, SourceType
 from app.models.detection_run import DetectionRun
 from app.models.detection_snapshot import DetectionSnapshot
 from app.schemas.detection import (
@@ -15,6 +15,7 @@ from app.schemas.detection import (
     DetectionStartRequest,
     DetectionStatusResponse,
     DetectionStopRequest,
+    Point,
     TrackOut,
 )
 from app.services.video_source import check_source
@@ -25,14 +26,22 @@ router = APIRouter(prefix="/api/detection", tags=["Detection"])
 
 
 def _to_status(session) -> DetectionStatusResponse:
+    p = session.processor
     return DetectionStatusResponse(
         camera_id=session.camera_id,
         state=session.state,
         source=session.source,
         started_at=session.started_at,
-        frames_processed=session.processor.frames_processed,
-        fps=round(session.processor.fps, 1),
-        unique_track_ids=session.processor.tracks.unique_ids,
+        frames_read=p.frames_read,
+        frames_processed=p.frames_processed,
+        frames_skipped=p.frames_skipped,
+        fps=round(p.fps, 1),
+        target_fps=p.config.target_fps,
+        conf=p.config.conf,
+        frame_width=p.frame_width or None,
+        frame_height=p.frame_height or None,
+        unique_track_ids=p.tracks.unique_ids,
+        tracks_in_memory=p.tracks.tracks_in_memory,
         run_id=session.run_id,
         snapshots_saved=session.snapshots_saved,
         db_errors=session.db_errors,
@@ -51,16 +60,22 @@ def start_detection(payload: DetectionStartRequest, db: Session = Depends(get_db
     camera = db.get(Camera, payload.camera_id)
     if camera is None:
         raise HTTPException(status_code=404, detail=f"Camera with id {payload.camera_id} not found")
-    if not camera.is_active:
+    if camera.status == CameraStatus.DISABLED:
         raise HTTPException(status_code=400, detail="Camera is not active")
-    if camera.source_type == SourceType.rtsp:
+    if camera.source_type in (SourceType.RTSP, SourceType.HTTP):
         raise HTTPException(status_code=400, detail="RTSP cameras are not supported yet")
 
     check = check_source(camera)
     if check["reachable"] is False:
         raise HTTPException(status_code=400, detail=f"Source not usable: {check['message']}")
 
-    config = VisionConfig(conf=payload.conf, imgsz=payload.imgsz)
+    config = VisionConfig(
+        conf=payload.conf if payload.conf is not None else camera.min_confidence,
+        imgsz=payload.imgsz,
+        track_buffer=payload.track_buffer,
+        target_fps=camera.processing_fps,
+        realtime=payload.realtime or camera.source_type == SourceType.USB,
+    )
     try:
         session = detection_manager.start(camera.id, camera.source_path, config)
     except SessionAlreadyRunning as error:
@@ -107,11 +122,14 @@ def latest_results(camera_id: int, db: Session = Depends(get_db)):
             frame_number=result.frame_number,
             timestamp=result.timestamp,
             people_detected=result.people_detected,
+            frame_width=result.frame_width, 
+            frame_height=result.frame_height,
             tracks=[
                 TrackOut(
                     track_id=p.track_id,
                     confidence=p.confidence,
                     bbox=BBox(x=p.x, y=p.y, width=p.width, height=p.height),
+                    foot_point=Point(x=p.foot_x, y=p.foot_y),
                 )
                 for p in result.people
             ],
@@ -143,6 +161,7 @@ def latest_results(camera_id: int, db: Session = Depends(get_db)):
                 track_id=o.track_id,
                 confidence=o.confidence,
                 bbox=BBox(x=o.x, y=o.y, width=o.width, height=o.height),
+                foot_point=Point(x=o.x + o.width // 2, y=o.y + o.height),
             )
             for o in snapshot.observations
         ],

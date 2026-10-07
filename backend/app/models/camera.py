@@ -1,7 +1,7 @@
 import enum
 
 from sqlalchemy import (
-    Boolean, Column, DateTime, Enum, ForeignKey, Integer, String, func, text,
+    Column, DateTime, Enum, Float, ForeignKey, Integer, Numeric, String, func, text,
 )
 from sqlalchemy.orm import relationship
 
@@ -9,9 +9,17 @@ from app.database import Base
 
 
 class SourceType(str, enum.Enum):
-    video_file = "video_file"
-    webcam = "webcam"
-    rtsp = "rtsp"
+    RTSP = "RTSP"
+    HTTP = "HTTP"
+    USB = "USB"
+    FILE = "FILE"
+
+
+class CameraStatus(str, enum.Enum):
+    CONNECTED = "CONNECTED"
+    DEGRADED = "DEGRADED"
+    DISCONNECTED = "DISCONNECTED"
+    DISABLED = "DISABLED"
 
 
 class Camera(Base):
@@ -25,10 +33,32 @@ class Camera(Base):
     source_type = Column(Enum(SourceType), nullable=False)
     source_path = Column(String(500), nullable=False)
     location_description = Column(String(255), nullable=True)
-    is_active = Column(Boolean, nullable=False, server_default=text("1"))
+
+    # monitored area A (full-frame mode). A zone's own area overrides it.
+    area_length_m = Column(Numeric(8, 2), nullable=True)
+    area_width_m = Column(Numeric(8, 2), nullable=True)
+    area_sqm = Column(Numeric(10, 2), nullable=True)
+
+    min_confidence = Column(Float, nullable=False, server_default=text("0.40"))
+    processing_fps = Column(Integer, nullable=False, server_default=text("10"))
+    status = Column(
+        Enum(CameraStatus), nullable=False, server_default="DISCONNECTED"
+    )
+    active_zone_id = Column(
+        Integer, ForeignKey("zones.id", ondelete="SET NULL"), nullable=True
+    )
     created_at = Column(DateTime, server_default=func.now(), nullable=False)
 
     event = relationship("Event", back_populates="cameras")
+
+    # All zones DEFINED for this camera (Zone.camera_id -> cameras.id)
     zones = relationship(
-        "Zone", back_populates="camera", cascade="all, delete-orphan"
+        "Zone",
+        back_populates="camera",
+        foreign_keys="Zone.camera_id",
+        cascade="all, delete-orphan",
+    )
+    # The ONE zone currently selected (cameras.active_zone_id -> zones.id)
+    active_zone = relationship(
+        "Zone", foreign_keys=[active_zone_id], post_update=True
     )
