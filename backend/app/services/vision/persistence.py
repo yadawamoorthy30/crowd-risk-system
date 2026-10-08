@@ -3,8 +3,7 @@ from typing import Optional
 
 from app.database import SessionLocal
 from app.models.detection_run import DetectionRun
-from app.models.detection_snapshot import DetectionSnapshot
-from app.models.track_observation import TrackObservation
+from app.models.metric_snapshot import MetricSnapshot
 from app.services.vision.config import VisionConfig
 from app.services.vision.results import FrameResult
 
@@ -27,27 +26,18 @@ def create_run(camera_id: int, config: VisionConfig) -> int:
         db.close()
 
 
-def save_snapshot(run_id: int, result: FrameResult) -> None:
+def save_metrics(camera_id: int, result: FrameResult) -> None:
+    """Store ONLY aggregated metrics. Per-track data never reaches the database."""
+    if result.metrics is None:
+        return
     db = SessionLocal()
     try:
-        snapshot = DetectionSnapshot(
-            run_id=run_id,
-            frame_number=result.frame_number,
-            captured_at=result.timestamp,
-            people_count=result.people_detected,
-        )
-        snapshot.observations = [
-            TrackObservation(
-                track_id=p.track_id,
-                confidence=p.confidence,
-                x=p.x,
-                y=p.y,
-                width=p.width,
-                height=p.height,
-            )
-            for p in result.people
-        ]
-        db.add(snapshot)
+        db.add(MetricSnapshot(
+            camera_id=camera_id,
+            ts=result.timestamp,
+            person_count=result.metrics.people_count,
+            density=result.metrics.density,
+        ))
         db.commit()
     finally:
         db.close()

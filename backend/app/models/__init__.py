@@ -3,5 +3,4 @@ from app.models.camera import Camera, SourceType, CameraStatus
 from app.models.zone import Zone
 from app.models.user import User, UserRole, UserStatus
 from app.models.detection_run import DetectionRun
-from app.models.detection_snapshot import DetectionSnapshot
-from app.models.track_observation import TrackObservation
+from app.models.metric_snapshot import MetricSnapshot

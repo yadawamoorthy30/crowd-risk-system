@@ -9,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app.services.vision.config import VisionConfig  # noqa: E402
 from app.services.vision.results import FrameResult  # noqa: E402
 from app.services.vision.video_processor import VideoProcessor  # noqa: E402
+from app.services.vision.metrics import MonitorArea  # noqa: E402
 
 DEFAULT_SOURCE = "dataset/videos/samples/sample_crowd.mp4"
 
@@ -24,6 +25,11 @@ def parse_args():
     parser.add_argument("--track-buffer", type=int, default=30, help="frames a lost track is kept")
     parser.add_argument("--realtime", action="store_true", help="drop frames when falling behind")
     parser.add_argument("--csv", default=None, help="optional path to save tracking results")
+    parser.add_argument("--area-sqm", type=float, default=None, help="monitored area A in m2")
+    parser.add_argument("--polygon", default=None,
+                        help='zone as normalised points, e.g. "0,0;0.5,0;0.5,1;0,1"')
+    parser.add_argument("--zone-name", default="Test zone")
+    parser.add_argument("--smooth", type=float, default=5.0, help="smoothing window in seconds")
     return parser.parse_args()
 
 
@@ -32,7 +38,14 @@ def main():
     config = VisionConfig(
         tracker=args.tracker, conf=args.conf, imgsz=args.imgsz,
         target_fps=args.fps, track_buffer=args.track_buffer, realtime=args.realtime,
+        smoothing_seconds=args.smooth,
     )
+    if args.polygon:
+        polygon = [[float(v) for v in pair.split(",")] for pair in args.polygon.split(";")]
+        monitor = MonitorArea(mode="zone", area_sqm=args.area_sqm,
+                              zone_name=args.zone_name, polygon=polygon)
+    else:
+        monitor = MonitorArea(mode="full_frame", area_sqm=args.area_sqm)
 
     csv_file = None
     writer = None
@@ -54,7 +67,8 @@ def main():
                                  p.track_id, p.confidence, p.x, p.y, p.width, p.height,
                                  p.foot_x, p.foot_y])
 
-    processor = VideoProcessor(args.source, config=config, show_window=True, on_result=on_result)
+    processor = VideoProcessor(args.source, config=config, show_window=True,
+                               on_result=on_result, monitor=monitor)
     try:
         processor.run()
     finally:

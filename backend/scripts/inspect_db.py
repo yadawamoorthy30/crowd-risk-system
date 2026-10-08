@@ -49,5 +49,9 @@ with engine.connect() as c:
         print(" ", tuple(r))
 
     print("\n== zones ==")
-    for r in c.execute(text("SELECT id, camera_id, name, area_sq_m FROM zones")):
+    for r in c.execute(text("SELECT id, camera_id, name, area_sqm FROM zones")):
+        print(" ", tuple(r))
+
+    print("\n== metric_snapshots (latest 5) ==")
+    for r in c.execute(text("SELECT id, camera_id, ts, person_count, density FROM metric_snapshots ORDER BY id DESC LIMIT 5")):
         print(" ", tuple(r))

@@ -1,7 +1,7 @@
 import time
 from collections import deque
 from typing import Callable, Optional
-
+import numpy as np
 import cv2
 
 from app.services.video_source import resolve_video_path
@@ -9,6 +9,7 @@ from app.services.vision.config import VisionConfig
 from app.services.vision.detector import PersonDetector
 from app.services.vision.results import FrameResult
 from app.services.vision.tracker import TrackManager
+from app.services.vision.metrics import MetricsCalculator, MonitorArea
 
 PALETTE = [
     (0, 255, 0), (255, 128, 0), (0, 200, 255), (255, 0, 255), (255, 255, 0),
@@ -44,6 +45,7 @@ class VideoProcessor:
         config: Optional[VisionConfig] = None,
         show_window: bool = False,
         on_result: Optional[Callable[[FrameResult], None]] = None,
+        monitor: Optional[MonitorArea] = None,
     ):
         self.source = source
         self.config = config or VisionConfig()
@@ -54,7 +56,9 @@ class VideoProcessor:
         self.tracks = TrackManager(
             history_length=self.config.history_length,
             track_buffer=self.config.track_buffer,
+            
         )
+        self.metrics = MetricsCalculator(monitor or MonitorArea(), self.config.smoothing_seconds)
 
         self.frames_read = 0        # every frame taken from the source
         self.frames_processed = 0   # frames actually analysed
@@ -132,6 +136,9 @@ class VideoProcessor:
             result = self.tracks.update(
                 boxes, self.frames_read, self.frame_width, self.frame_height
             )
+            result.metrics = self.metrics.update(
+                result.people, self.frame_width, self.frame_height
+            )
             self.frames_processed += 1
 
             finished = time.perf_counter()
@@ -152,13 +159,22 @@ class VideoProcessor:
                     break
 
     def _show(self, frame, result: FrameResult):
+        h, w = frame.shape[:2]
+        monitor = self.metrics.monitor
+        m = result.metrics
+
+        if monitor.mode == "zone" and monitor.polygon:
+            pts = np.array([[int(x * w), int(y * h)] for x, y in monitor.polygon], np.int32)
+            cv2.polylines(frame, [pts], True, (0, 255, 255), 2)
+
         for person in result.people:
-            color = PALETTE[person.track_id % len(PALETTE)]
+            # people outside the zone are drawn grey: tracked, but not counted
+            color = PALETTE[person.track_id % len(PALETTE)] if person.counted else (128, 128, 128)
             x1, y1 = person.x, person.y
             x2, y2 = x1 + person.width, y1 + person.height
 
             cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
-            cv2.circle(frame, (person.foot_x, person.foot_y), 4, color, -1)  # foot point
+            cv2.circle(frame, (person.foot_x, person.foot_y), 4, color, -1)
             cv2.putText(frame, f"ID {person.track_id}  {person.confidence:.2f}",
                         (x1, max(y1 - 5, 15)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
 
@@ -166,11 +182,22 @@ class VideoProcessor:
             for p1, p2 in zip(points, points[1:]):
                 cv2.line(frame, p1, p2, color, 2)
 
-        cv2.putText(frame,
-                    f"Tracked now: {result.people_detected}   Unique IDs so far: {self.tracks.unique_ids}",
-                    (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
-        cv2.putText(frame,
-                    f"Frame: {result.frame_number}  FPS: {self.fps:.1f}/{self.config.target_fps}  "
-                    f"Skipped: {self.frames_skipped}",
-                    (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+        yellow = (0, 255, 255)
+        cv2.putText(frame, f"Tracked in frame: {result.people_detected}   "
+                           f"Unique IDs so far: {self.tracks.unique_ids}",
+                    (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, yellow, 2)
+        cv2.putText(frame, f"N(t): {m.people_count}  (avg {m.people_count_smoothed:.1f})",
+                    (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, yellow, 2)
+        if m.density is None:
+            density_text = f"D(t): {m.message}"
+        else:
+            density_text = f"D(t): {m.density:.3f}  (avg {m.density_smoothed:.3f}) people/m2"
+        cv2.putText(frame, density_text, (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.7, yellow, 2)
+
+        area_text = f"{m.area_sqm:g} m2" if m.area_sqm is not None else "area not set"
+        label = f"Zone: {m.zone_name} ({area_text})" if m.mode == "zone" else f"Full frame ({area_text})"
+        cv2.putText(frame, label, (10, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.7, yellow, 2)
+        cv2.putText(frame, f"Frame: {result.frame_number}  FPS: {self.fps:.1f}/{self.config.target_fps}  "
+                           f"Skipped: {self.frames_skipped}",
+                    (10, 150), cv2.FONT_HERSHEY_SIMPLEX, 0.6, yellow, 2)
         cv2.imshow("Person tracking (press q to quit)", frame)

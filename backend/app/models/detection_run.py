@@ -1,5 +1,4 @@
 from sqlalchemy import Column, DateTime, Float, ForeignKey, Integer, String, func
-from sqlalchemy.orm import relationship
 
 from app.database import Base
 
@@ -19,7 +18,3 @@ class DetectionRun(Base):
     tracker = Column(String(50), nullable=False)
     frames_processed = Column(Integer, nullable=False, default=0)
     error_message = Column(String(255), nullable=True)
-
-    snapshots = relationship(
-        "DetectionSnapshot", back_populates="run", cascade="all, delete-orphan"
-    )

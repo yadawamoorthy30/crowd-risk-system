@@ -3,6 +3,7 @@ from collections import deque
 from datetime import datetime
 
 from app.services.vision.results import FrameResult, TrackedPerson
+from app.services.vision.metrics import foot_point
 
 
 class TrackManager:
@@ -25,7 +26,7 @@ class TrackManager:
             track_ids = boxes.id.int().tolist()
             for box, track_id in zip(boxes, track_ids):
                 x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
-                foot_x, foot_y = (x1 + x2) // 2, y2  # bottom-centre
+                foot_x, foot_y = foot_point(x1, y1, x2, y2)
                 people.append(
                     TrackedPerson(
                         track_id=track_id,

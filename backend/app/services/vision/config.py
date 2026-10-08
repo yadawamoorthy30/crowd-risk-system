@@ -22,3 +22,4 @@ class VisionConfig:
     target_fps: int = 10          # analysis rate, from cameras.processing_fps
     realtime: bool = False        # True = also drop frames when we fall behind
     history_length: int = 30      # positions kept per track
+    smoothing_seconds: float = 5.0  # window for the N(t) / D(t) moving average

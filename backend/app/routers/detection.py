@@ -1,3 +1,4 @@
+from dataclasses import asdict
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -6,7 +7,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.camera import Camera, CameraStatus, SourceType
 from app.models.detection_run import DetectionRun
-from app.models.detection_snapshot import DetectionSnapshot
+from app.models.metric_snapshot import MetricSnapshot
 from app.schemas.detection import (
     BBox,
     CountPoint,
@@ -15,12 +16,14 @@ from app.schemas.detection import (
     DetectionStartRequest,
     DetectionStatusResponse,
     DetectionStopRequest,
+    MetricsOut,
     Point,
     TrackOut,
 )
 from app.services.video_source import check_source
 from app.services.vision.config import VisionConfig
 from app.services.vision.manager import SessionAlreadyRunning, detection_manager
+from app.services.vision.metrics import MonitorArea
 
 router = APIRouter(prefix="/api/detection", tags=["Detection"])
 
@@ -54,6 +57,22 @@ def _require_camera(db: Session, camera_id: int) -> None:
         raise HTTPException(status_code=404, detail=f"Camera with id {camera_id} not found")
 
 
+def _build_monitor(camera: Camera) -> MonitorArea:
+    zone = camera.active_zone
+    if zone is not None:
+        return MonitorArea(
+            mode="zone",
+            area_sqm=float(zone.area_sqm),
+            zone_id=zone.id,
+            zone_name=zone.name,
+            polygon=zone.polygon,
+        )
+    return MonitorArea(
+        mode="full_frame",
+        area_sqm=float(camera.area_sqm) if camera.area_sqm is not None else None,
+    )
+
+
 @router.post("/start", response_model=DetectionStatusResponse,
              status_code=status.HTTP_202_ACCEPTED)
 def start_detection(payload: DetectionStartRequest, db: Session = Depends(get_db)):
@@ -75,9 +94,12 @@ def start_detection(payload: DetectionStartRequest, db: Session = Depends(get_db
         track_buffer=payload.track_buffer,
         target_fps=camera.processing_fps,
         realtime=payload.realtime or camera.source_type == SourceType.USB,
+        smoothing_seconds=payload.smoothing_seconds,
     )
     try:
-        session = detection_manager.start(camera.id, camera.source_path, config)
+        session = detection_manager.start(
+            camera.id, camera.source_path, config, _build_monitor(camera)
+        )
     except SessionAlreadyRunning as error:
         raise HTTPException(status_code=409, detail=str(error))
     except Exception as error:
@@ -122,7 +144,7 @@ def latest_results(camera_id: int, db: Session = Depends(get_db)):
             frame_number=result.frame_number,
             timestamp=result.timestamp,
             people_detected=result.people_detected,
-            frame_width=result.frame_width, 
+            frame_width=result.frame_width,
             frame_height=result.frame_height,
             tracks=[
                 TrackOut(
@@ -130,20 +152,22 @@ def latest_results(camera_id: int, db: Session = Depends(get_db)):
                     confidence=p.confidence,
                     bbox=BBox(x=p.x, y=p.y, width=p.width, height=p.height),
                     foot_point=Point(x=p.foot_x, y=p.foot_y),
+                    counted=p.counted,
                 )
                 for p in result.people
             ],
+            metrics=MetricsOut(**asdict(result.metrics)) if result.metrics else None,
         )
 
-    # 2) Otherwise: the last snapshot saved in MySQL
-    snapshot = (
-        db.query(DetectionSnapshot)
-        .join(DetectionRun, DetectionSnapshot.run_id == DetectionRun.id)
-        .filter(DetectionRun.camera_id == camera_id)
-        .order_by(DetectionSnapshot.id.desc())
+    # 2) Otherwise: the last aggregated sample saved in MySQL.
+    #    Per-track data is never stored, so tracks is empty here.
+    row = (
+        db.query(MetricSnapshot)
+        .filter(MetricSnapshot.camera_id == camera_id)
+        .order_by(MetricSnapshot.id.desc())
         .first()
     )
-    if snapshot is None:
+    if row is None:
         raise HTTPException(
             status_code=404,
             detail=f"No detection results stored for camera {camera_id}",
@@ -151,20 +175,11 @@ def latest_results(camera_id: int, db: Session = Depends(get_db)):
 
     return DetectionResultsResponse(
         camera_id=camera_id,
-        run_id=snapshot.run_id,
         source="database",
-        frame_number=snapshot.frame_number,
-        timestamp=snapshot.captured_at,
-        people_detected=snapshot.people_count,
-        tracks=[
-            TrackOut(
-                track_id=o.track_id,
-                confidence=o.confidence,
-                bbox=BBox(x=o.x, y=o.y, width=o.width, height=o.height),
-                foot_point=Point(x=o.x + o.width // 2, y=o.y + o.height),
-            )
-            for o in snapshot.observations
-        ],
+        timestamp=row.ts,
+        people_detected=row.person_count,
+        metrics=MetricsOut(people_count=row.person_count, density=row.density),
+        tracks=[],
     )
 
 
@@ -177,10 +192,9 @@ def detection_history(
     _require_camera(db, camera_id)
 
     rows = (
-        db.query(DetectionSnapshot)
-        .join(DetectionRun, DetectionSnapshot.run_id == DetectionRun.id)
-        .filter(DetectionRun.camera_id == camera_id)
-        .order_by(DetectionSnapshot.id.desc())
+        db.query(MetricSnapshot)
+        .filter(MetricSnapshot.camera_id == camera_id)
+        .order_by(MetricSnapshot.id.desc())
         .limit(limit)
         .all()
     )
@@ -190,12 +204,7 @@ def detection_history(
         camera_id=camera_id,
         count=len(rows),
         points=[
-            CountPoint(
-                run_id=r.run_id,
-                frame_number=r.frame_number,
-                captured_at=r.captured_at,
-                people_count=r.people_count,
-            )
+            CountPoint(ts=r.ts, person_count=r.person_count, density=r.density)
             for r in rows
         ],
     )

@@ -8,6 +8,7 @@ from app.services.vision import persistence
 from app.services.vision.config import SNAPSHOT_INTERVAL_SECONDS, VisionConfig
 from app.services.vision.results import FrameResult
 from app.services.vision.video_processor import VideoProcessor
+from app.services.vision.metrics import MonitorArea
 
 
 class SessionAlreadyRunning(Exception):
@@ -36,7 +37,8 @@ class DetectionManager:
         self._sessions: Dict[int, DetectionSession] = {}
         self._lock = threading.Lock()
 
-    def start(self, camera_id: int, source: str, config: VisionConfig) -> DetectionSession:
+    def start(self, camera_id: int, source: str, config: VisionConfig,
+              monitor: Optional[MonitorArea] = None) -> DetectionSession:
         with self._lock:
             existing = self._sessions.get(camera_id)
             if existing and existing.thread and existing.thread.is_alive():
@@ -51,7 +53,7 @@ class DetectionManager:
                 if now - session.last_saved_at >= SNAPSHOT_INTERVAL_SECONDS:
                     session.last_saved_at = now
                     try:
-                        persistence.save_snapshot(session.run_id, result)
+                        persistence.save_metrics(session.camera_id, result)
                         session.snapshots_saved += 1
                     except Exception as error:
                         session.db_errors += 1
@@ -59,8 +61,10 @@ class DetectionManager:
 
             # Build the detector first: a missing model fails here, before any run row exists
             session.processor = VideoProcessor(
-                source, config=config, show_window=False, on_result=on_result
+                source, config=config, show_window=False, on_result=on_result,
+                monitor=monitor,
             )
+            
             session.run_id = persistence.create_run(camera_id, config)
 
             session.thread = threading.Thread(

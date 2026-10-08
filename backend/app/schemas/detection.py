@@ -10,6 +10,7 @@ class DetectionStartRequest(BaseModel):
     imgsz: int = Field(640, ge=320, le=1920)
     track_buffer: int = Field(30, ge=1, le=300)
     realtime: bool = False  # True = drop frames when processing falls behind
+    smoothing_seconds: float = Field(5.0, ge=1, le=60)
 
 
 class DetectionStopRequest(BaseModel):
@@ -53,25 +54,38 @@ class TrackOut(BaseModel):
     confidence: float
     bbox: BBox
     foot_point: Point
+    counted: bool = True
+
+
+class MetricsOut(BaseModel):
+    mode: Optional[str] = None             # "full_frame" or "zone" (live only)
+    zone_id: Optional[int] = None
+    zone_name: Optional[str] = None
+    area_sqm: Optional[float] = None
+    people_count: int                      # N(t)
+    people_count_smoothed: Optional[float] = None  # live only
+    density: Optional[float] = None        # D(t), people per m2
+    density_smoothed: Optional[float] = None
+    message: Optional[str] = None
 
 
 class DetectionResultsResponse(BaseModel):
     camera_id: int
     run_id: Optional[int] = None
     source: str                      # "live" or "database"
-    frame_number: int
+    frame_number: Optional[int] = None     # only known for live results
     timestamp: datetime
     frame_width: Optional[int] = None
     frame_height: Optional[int] = None
     people_detected: int
     tracks: List[TrackOut]
+    metrics: Optional[MetricsOut] = None
 
 
 class CountPoint(BaseModel):
-    run_id: int
-    frame_number: int
-    captured_at: datetime
-    people_count: int
+    ts: datetime
+    person_count: int
+    density: Optional[float] = None
 
 
 class DetectionHistoryResponse(BaseModel):
