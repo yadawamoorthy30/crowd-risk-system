@@ -1,8 +1,8 @@
 from decimal import Decimal
 from datetime import datetime
-from typing import Optional
+from typing import List, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
 
 from app.models.camera import CameraStatus, SourceType
 
@@ -44,6 +44,7 @@ class CameraResponse(BaseModel):
     processing_fps: int
     status: CameraStatus
     active_zone_id: Optional[int] = None
+    has_credentials: bool = False
     created_at: datetime
 
 
@@ -51,12 +52,18 @@ class SourceCheckResponse(BaseModel):
     camera_id: int
     source_type: str
     source_path: str
-    reachable: Optional[bool] = None
+    reachable: Optional[bool] = None       # None = not tested (network streams)
+    readable: Optional[bool] = None        # at least one frame could be read
     message: str
     width: Optional[int] = None
     height: Optional[int] = None
+    resolution: Optional[str] = None       # e.g. "1280x720"
     fps: Optional[float] = None
     frame_count: Optional[int] = None
+    duration_seconds: Optional[float] = None
+    frames_tested: int = 0
+    meets_requirements: Optional[bool] = None  # True = no warnings
+    warnings: List[str] = Field(default_factory=list)
 
 class CameraAreaUpdate(BaseModel):
     area_length_m: Optional[float] = Field(None, gt=0, le=1000, allow_inf_nan=False)
@@ -85,3 +92,7 @@ class CameraAreaUpdate(BaseModel):
 class ActiveZoneUpdate(BaseModel):
     # required key, but the value may be null (= full frame)
     zone_id: Optional[int] = Field(..., gt=0)
+
+class CameraCredentialsUpdate(BaseModel):
+    username: str = Field(..., min_length=1, max_length=100)
+    password: SecretStr = Field(..., min_length=1, max_length=200)

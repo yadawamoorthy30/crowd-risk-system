@@ -1,7 +1,7 @@
 import enum
 
 from sqlalchemy import (
-    Column, DateTime, Enum, Float, ForeignKey, Integer, Numeric, String, func, text,
+    Column, DateTime, Enum, Float, ForeignKey, Integer, Numeric, String, Text, func, text,
 )
 from sqlalchemy.orm import relationship
 
@@ -47,6 +47,7 @@ class Camera(Base):
     active_zone_id = Column(
         Integer, ForeignKey("zones.id", ondelete="SET NULL"), nullable=True
     )
+    credentials_encrypted = Column(Text, nullable=True)  # Fernet token; never returned by the API
     created_at = Column(DateTime, server_default=func.now(), nullable=False)
 
     event = relationship("Event", back_populates="cameras")
@@ -62,3 +63,7 @@ class Camera(Base):
     active_zone = relationship(
         "Zone", foreign_keys=[active_zone_id], post_update=True
     )
+
+    @property
+    def has_credentials(self) -> bool:
+        return self.credentials_encrypted is not None

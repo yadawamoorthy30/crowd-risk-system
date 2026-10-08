@@ -8,3 +8,5 @@ __pycache__/
 *.sql
 
 *.sql
+
+dataset/videos/samples/test_*.mp4
