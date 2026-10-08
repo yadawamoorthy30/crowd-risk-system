@@ -11,7 +11,7 @@ from app.services.vision.results import FrameResult  # noqa: E402
 from app.services.vision.video_processor import VideoProcessor  # noqa: E402
 from app.services.vision.metrics import MonitorArea  # noqa: E402
 
-DEFAULT_SOURCE = "dataset/videos/samples/sample_crowd.mp4"
+DEFAULT_SOURCE = "dataset/raw/sample_crowd.mp4"
 
 
 def parse_args():

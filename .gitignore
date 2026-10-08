@@ -16,3 +16,5 @@ runs/
 
 backend/outputs/
 *.sql
+
+dataset/evaluation_clips/validation_tests/

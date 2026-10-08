@@ -10,3 +10,5 @@ __pycache__/
 *.sql
 
 dataset/videos/samples/test_*.mp4
+
+.pytest_cache/
