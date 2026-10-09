@@ -10,6 +10,7 @@ from app.services.vision.detector import PersonDetector
 from app.services.vision.results import FrameResult
 from app.services.vision.tracker import TrackManager
 from app.services.vision.metrics import MetricsCalculator, MonitorArea
+from app.services.vision.flow import TripwireCounter, TripwireLine
 
 PALETTE = [
     (0, 255, 0), (255, 128, 0), (0, 200, 255), (255, 0, 255), (255, 255, 0),
@@ -46,6 +47,7 @@ class VideoProcessor:
         show_window: bool = False,
         on_result: Optional[Callable[[FrameResult], None]] = None,
         monitor: Optional[MonitorArea] = None,
+        tripwire: Optional[TripwireLine] = None,
     ):
         self.source = source
         self.config = config or VisionConfig()
@@ -59,6 +61,12 @@ class VideoProcessor:
             
         )
         self.metrics = MetricsCalculator(monitor or MonitorArea(), self.config.smoothing_seconds)
+
+                # Tripwire IN/OUT counting (None = no tripwire configured)
+        self.flow = (
+            TripwireCounter(tripwire, forget_after=self.config.track_buffer)
+            if tripwire is not None else None
+        )
 
         self.frames_read = 0        # every frame taken from the source
         self.frames_processed = 0   # frames actually analysed
@@ -139,6 +147,15 @@ class VideoProcessor:
             result.metrics = self.metrics.update(
                 result.people, self.frame_width, self.frame_height
             )
+
+            if self.flow is not None:
+                self.flow.update(
+                    result.people,
+                    self.frame_width,
+                    self.frame_height,
+                    self.frames_read / self.source_fps,   # video time in seconds
+                )
+
             self.frames_processed += 1
 
             finished = time.perf_counter()
@@ -182,6 +199,9 @@ class VideoProcessor:
             for p1, p2 in zip(points, points[1:]):
                 cv2.line(frame, p1, p2, color, 2)
 
+        if self.flow is not None:
+            self._draw_tripwire(frame)
+
         yellow = (0, 255, 255)
         cv2.putText(frame, f"Tracked in frame: {result.people_detected}   "
                            f"Unique IDs so far: {self.tracks.unique_ids}",
@@ -201,3 +221,27 @@ class VideoProcessor:
                            f"Skipped: {self.frames_skipped}",
                     (10, 150), cv2.FONT_HERSHEY_SIMPLEX, 0.6, yellow, 2)
         cv2.imshow("Person tracking (press q to quit)", frame)
+
+
+    def _draw_tripwire(self, frame):
+        h, w = frame.shape[:2]
+        line = self.flow.line
+        ax, ay = int(line.x1 * w), int(line.y1 * h)
+        bx, by = int(line.x2 * w), int(line.y2 * h)
+        red = (0, 0, 255)
+        cv2.line(frame, (ax, ay), (bx, by), red, 3)
+
+        # arrow pointing to the IN side
+        dx, dy = bx - ax, by - ay
+        length = max((dx * dx + dy * dy) ** 0.5, 1.0)
+        nx, ny = -dy / length, dx / length       # unit normal towards the RIGHT side
+        mx, my = (ax + bx) // 2, (ay + by) // 2
+        tip = (int(mx + line.in_sign * nx * 50), int(my + line.in_sign * ny * 50))
+        cv2.arrowedLine(frame, (mx, my), tip, red, 3, tipLength=0.3)
+        cv2.putText(frame, "IN", (tip[0] + 6, tip[1] + 6),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, red, 2)
+
+        cv2.putText(frame, f"IN: {self.flow.in_total}   OUT: {self.flow.out_total}",
+                    (10, 180), cv2.FONT_HERSHEY_SIMPLEX, 0.9, red, 2)
+
+        
