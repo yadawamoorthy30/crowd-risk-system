@@ -2,7 +2,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from app.routers import cameras, detection, events, health, zones
+from app.routers import cameras, detection, events, health, tripwire, zones
 from app.services.vision import persistence
 
 
@@ -25,4 +25,5 @@ app.include_router(health.router)
 app.include_router(events.router)
 app.include_router(cameras.router)
 app.include_router(zones.router)
+app.include_router(tripwire.router)
 app.include_router(detection.router)
