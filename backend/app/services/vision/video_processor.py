@@ -12,6 +12,8 @@ from app.services.vision.tracker import TrackManager
 from app.services.vision.metrics import MetricsCalculator, MonitorArea
 from app.services.vision.flow import TripwireCounter, TripwireLine
 from app.services.vision.flow_metrics import FlowMetricsCalculator
+from app.services.vision.heatmap import HeatmapCalculator, normalise
+from app.services.vision.heatmap_render import draw_legend, overlay_heatmap
 
 PALETTE = [
     (0, 255, 0), (255, 128, 0), (0, 200, 255), (255, 0, 255), (255, 255, 0),
@@ -76,6 +78,14 @@ class VideoProcessor:
             growth_window_sec=self.config.growth_window_sec,
         )
         self.latest_flow = None
+
+        self.heatmap = HeatmapCalculator(
+            cols=self.config.heatmap_cols,
+            rows=self.config.heatmap_rows,
+            window_minutes=self.config.heatmap_window_min,
+        )
+        self.show_heatmap = True        # 'h' key
+        self.heatmap_mode = "window"    # 'm' key: "window" or "instant"
 
         self.frames_read = 0        # every frame taken from the source
         self.frames_processed = 0   # frames actually analysed
@@ -166,6 +176,11 @@ class VideoProcessor:
                 self.flow, result.metrics.people_count_smoothed, video_time
             )
 
+            self.heatmap.update(
+                [(p.foot_x, p.foot_y) for p in result.people if p.counted],
+                self.frame_width, self.frame_height, video_time,
+            )
+
             self.frames_processed += 1
 
             finished = time.perf_counter()
@@ -182,13 +197,20 @@ class VideoProcessor:
 
             if self.show_window:
                 self._show(frame, result)
-                if cv2.waitKey(1) & 0xFF == ord("q"):
+                key = cv2.waitKey(1) & 0xFF
+                if key == ord("q"):
                     break
+                if key == ord("h"):
+                    self.show_heatmap = not self.show_heatmap
+                elif key == ord("m"):
+                    self.heatmap_mode = "instant" if self.heatmap_mode == "window" else "window"
 
     def _show(self, frame, result: FrameResult):
         h, w = frame.shape[:2]
         monitor = self.metrics.monitor
         m = result.metrics
+
+        self._draw_heatmap(frame)
 
         if monitor.mode == "zone" and monitor.polygon:
             pts = np.array([[int(x * w), int(y * h)] for x, y in monitor.polygon], np.int32)
@@ -231,7 +253,7 @@ class VideoProcessor:
         cv2.putText(frame, f"Frame: {result.frame_number}  FPS: {self.fps:.1f}/{self.config.target_fps}  "
                            f"Skipped: {self.frames_skipped}",
                     (10, 150), cv2.FONT_HERSHEY_SIMPLEX, 0.6, yellow, 2)
-        cv2.imshow("Person tracking (press q to quit)", frame)
+        cv2.imshow("Person tracking (q quit, h heatmap, m mode)", frame)
 
 
     def _draw_tripwire(self, frame):
@@ -274,5 +296,16 @@ class VideoProcessor:
         else:
             growth_text = f"R(t): {fm.growth_rate:+.1f} people/min  (over {fm.growth_window_sec:g}s)"
         cv2.putText(frame, growth_text, (10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.7, green, 2)
+
+    def _draw_heatmap(self, frame):
+        if not self.show_heatmap:
+            return
+        mode = self.heatmap_mode
+        overlay_heatmap(frame, normalise(self.heatmap.grid(mode)))
+        if mode == "instant":
+            title = "Heatmap: instant (people per cell)"
+        else:
+            title = f"Heatmap: last {self.config.heatmap_window_min} min (avg people per cell)"
+        draw_legend(frame, title, f"busiest cell: {self.heatmap.peak(mode):.1f}")
 
         

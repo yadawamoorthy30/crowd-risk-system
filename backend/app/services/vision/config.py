@@ -26,3 +26,8 @@ class VisionConfig:
     initial_count: int = 0           # people already inside when detection starts
     flow_window_sec: float = 60.0    # rolling window for IN/OUT and net flow F(t)
     growth_window_sec: float = 60.0  # dt for R(t); minimum 10 s
+    heatmap_cols: int = 32          # grid size (FR-HMP-001)
+    heatmap_rows: int = 18
+    heatmap_window_min: int = 5     # window mode: 1, 5, 15 or 30 minutes (FR-HMP-002)
+    occupancy_tolerance_pct: float = 30.0
+    occupancy_min_difference: float = 3.0
