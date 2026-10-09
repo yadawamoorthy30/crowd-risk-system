@@ -16,6 +16,7 @@ from app.schemas.detection import (
     DetectionStartRequest,
     DetectionStatusResponse,
     DetectionStopRequest,
+    FlowOut,
     MetricsOut,
     Point,
     TrackOut,
@@ -24,6 +25,8 @@ from app.services.video_source import check_source
 from app.services.vision.config import VisionConfig
 from app.services.vision.manager import SessionAlreadyRunning, detection_manager
 from app.services.vision.metrics import MonitorArea
+from app.models.tripwire import Tripwire
+from app.services.vision.flow import TripwireLine
 
 router = APIRouter(prefix="/api/detection", tags=["Detection"])
 
@@ -49,12 +52,27 @@ def _to_status(session) -> DetectionStatusResponse:
         snapshots_saved=session.snapshots_saved,
         db_errors=session.db_errors,
         error=session.error,
+        flow=_flow_out(p),
     )
 
 
 def _require_camera(db: Session, camera_id: int) -> None:
     if db.get(Camera, camera_id) is None:
         raise HTTPException(status_code=404, detail=f"Camera with id {camera_id} not found")
+
+def _flow_out(processor) -> FlowOut:
+    fm = processor.latest_flow
+    if fm is None:   # no frame has been processed yet
+        return FlowOut(
+            tripwire_configured=processor.flow is not None,
+            message="Waiting for first frame" if processor.flow is not None
+            else "Tripwire not configured",
+        )
+    return FlowOut(**asdict(fm))
+
+def _load_tripwire(db: Session, camera_id: int) -> Optional[TripwireLine]:
+    row = db.query(Tripwire).filter(Tripwire.camera_id == camera_id).first()
+    return TripwireLine.from_model(row) if row is not None else None
 
 
 def _build_monitor(camera: Camera) -> MonitorArea:
@@ -95,10 +113,14 @@ def start_detection(payload: DetectionStartRequest, db: Session = Depends(get_db
         target_fps=camera.processing_fps,
         realtime=payload.realtime or camera.source_type == SourceType.USB,
         smoothing_seconds=payload.smoothing_seconds,
+        initial_count=payload.initial_count,
+        flow_window_sec=payload.flow_window_sec,
+        growth_window_sec=payload.growth_window_sec,
     )
     try:
         session = detection_manager.start(
-            camera.id, camera.source_path, config, _build_monitor(camera)
+            camera.id, camera.source_path, config, _build_monitor(camera),
+            tripwire=_load_tripwire(db, camera.id),
         )
     except SessionAlreadyRunning as error:
         raise HTTPException(status_code=409, detail=str(error))
@@ -157,6 +179,7 @@ def latest_results(camera_id: int, db: Session = Depends(get_db)):
                 for p in result.people
             ],
             metrics=MetricsOut(**asdict(result.metrics)) if result.metrics else None,
+            flow=_flow_out(session.processor),
         )
 
     # 2) Otherwise: the last aggregated sample saved in MySQL.

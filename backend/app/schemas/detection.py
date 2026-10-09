@@ -11,11 +11,29 @@ class DetectionStartRequest(BaseModel):
     track_buffer: int = Field(30, ge=1, le=300)
     realtime: bool = False  # True = drop frames when processing falls behind
     smoothing_seconds: float = Field(5.0, ge=1, le=60)
+    initial_count: int = Field(0, ge=0, le=100000)      # people already inside at start
+    flow_window_sec: int = Field(60, ge=10, le=600)     # rolling window for F(t)
+    growth_window_sec: int = Field(60, ge=10, le=600)   # dt for R(t), minimum 10 s
 
 
 class DetectionStopRequest(BaseModel):
     camera_id: int = Field(..., gt=0)
 
+class FlowOut(BaseModel):
+    tripwire_configured: bool
+    video_time: Optional[float] = None
+    in_total: Optional[int] = None
+    out_total: Optional[int] = None
+    rolling_in: Optional[int] = None
+    rolling_out: Optional[int] = None
+    net_flow: Optional[int] = None                 # F(t) = rolling_in - rolling_out
+    flow_window_sec: Optional[float] = None
+    initial_count: Optional[int] = None
+    cumulative_occupancy: Optional[int] = None
+    growth_rate: Optional[float] = None            # R(t), people per minute
+    growth_window_sec: Optional[float] = None      # window actually used
+    message: Optional[str] = None                  # e.g. "Tripwire not configured"
+    growth_message: Optional[str] = None           # e.g. "not available yet"
 
 class DetectionStatusResponse(BaseModel):
     camera_id: int
@@ -36,6 +54,7 @@ class DetectionStatusResponse(BaseModel):
     snapshots_saved: int = 0
     db_errors: int = 0
     error: Optional[str] = None
+    flow: Optional[FlowOut] = None
 
 
 class BBox(BaseModel):
@@ -80,6 +99,7 @@ class DetectionResultsResponse(BaseModel):
     people_detected: int
     tracks: List[TrackOut]
     metrics: Optional[MetricsOut] = None
+    flow: Optional[FlowOut] = None
 
 
 class CountPoint(BaseModel):

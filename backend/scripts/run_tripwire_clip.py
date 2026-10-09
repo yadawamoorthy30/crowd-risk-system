@@ -24,13 +24,21 @@ def main():
                         metavar=("X1", "Y1", "X2", "Y2"))
     parser.add_argument("--in-side", choices=["LEFT", "RIGHT"], default="RIGHT")
     parser.add_argument("--cooldown", type=float, default=3.0)
+    parser.add_argument("--initial-count", type=int, default=0)
+    parser.add_argument("--flow-window", type=float, default=60.0)
+    parser.add_argument("--growth-window", type=float, default=60.0)
     args = parser.parse_args()
 
     clip = Path(args.clip)
     line = TripwireLine(*args.line, in_side=args.in_side, cooldown_sec=args.cooldown)
 
     # realtime=False: analyse every Nth frame instead of dropping frames to keep up
-    config = VisionConfig(realtime=False)
+    config = VisionConfig(
+        realtime=False,
+        initial_count=args.initial_count,
+        flow_window_sec=args.flow_window,
+        growth_window_sec=args.growth_window,
+    )
     processor = VideoProcessor(str(clip), config=config, show_window=True, tripwire=line)
     processor.run()
 
@@ -43,6 +51,15 @@ def main():
     print(f"Tripwire result:  IN = {flow.in_total}   OUT = {flow.out_total}")
     for e in flow.events:
         print(f"  {e.video_time:6.1f} s  {e.direction}")
+
+    fm = processor.latest_flow
+    if fm is not None and fm.net_flow is not None:
+        print(f"Net flow (last {fm.flow_window_sec:g} s): IN {fm.rolling_in}  "
+              f"OUT {fm.rolling_out}  net {fm.net_flow:+d}")
+        print(f"Cumulative occupancy: {fm.cumulative_occupancy}  (initial {fm.initial_count})")
+    if fm is not None:
+        rate = "not available" if fm.growth_rate is None else f"{fm.growth_rate:+.1f} people/min"
+        print(f"Growth rate R(t) at the end: {rate}  (window {fm.growth_window_sec:g} s)")
 
     gt = PROJECT_ROOT / "dataset" / "ground_truth" / f"{clip.stem}.csv"
     if gt.is_file():

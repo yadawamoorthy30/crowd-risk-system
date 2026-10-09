@@ -11,6 +11,7 @@ from app.services.vision.results import FrameResult
 from app.services.vision.tracker import TrackManager
 from app.services.vision.metrics import MetricsCalculator, MonitorArea
 from app.services.vision.flow import TripwireCounter, TripwireLine
+from app.services.vision.flow_metrics import FlowMetricsCalculator
 
 PALETTE = [
     (0, 255, 0), (255, 128, 0), (0, 200, 255), (255, 0, 255), (255, 255, 0),
@@ -67,6 +68,14 @@ class VideoProcessor:
             TripwireCounter(tripwire, forget_after=self.config.track_buffer)
             if tripwire is not None else None
         )
+
+        # F(t), cumulative occupancy and R(t); growth works even without a tripwire
+        self.flow_calc = FlowMetricsCalculator(
+            initial_count=self.config.initial_count,
+            flow_window_sec=self.config.flow_window_sec,
+            growth_window_sec=self.config.growth_window_sec,
+        )
+        self.latest_flow = None
 
         self.frames_read = 0        # every frame taken from the source
         self.frames_processed = 0   # frames actually analysed
@@ -148,13 +157,14 @@ class VideoProcessor:
                 result.people, self.frame_width, self.frame_height
             )
 
+            video_time = self.frames_read / self.source_fps   # seconds into the video
             if self.flow is not None:
                 self.flow.update(
-                    result.people,
-                    self.frame_width,
-                    self.frame_height,
-                    self.frames_read / self.source_fps,   # video time in seconds
+                    result.people, self.frame_width, self.frame_height, video_time
                 )
+            result.flow = self.latest_flow = self.flow_calc.update(
+                self.flow, result.metrics.people_count_smoothed, video_time
+            )
 
             self.frames_processed += 1
 
@@ -201,6 +211,7 @@ class VideoProcessor:
 
         if self.flow is not None:
             self._draw_tripwire(frame)
+        self._draw_flow_metrics(frame)
 
         yellow = (0, 255, 255)
         cv2.putText(frame, f"Tracked in frame: {result.people_detected}   "
@@ -243,5 +254,25 @@ class VideoProcessor:
 
         cv2.putText(frame, f"IN: {self.flow.in_total}   OUT: {self.flow.out_total}",
                     (10, 180), cv2.FONT_HERSHEY_SIMPLEX, 0.9, red, 2)
+        
+    def _draw_flow_metrics(self, frame):
+        fm = self.latest_flow
+        if fm is None:
+            return
+        green = (0, 255, 0)
+        y = 210
+        if fm.net_flow is not None:
+            cv2.putText(frame, f"F(t) last {fm.flow_window_sec:g}s: IN {fm.rolling_in}  "
+                               f"OUT {fm.rolling_out}  net {fm.net_flow:+d}",
+                        (10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.7, green, 2)
+            y += 30
+            cv2.putText(frame, f"Occupancy: {fm.cumulative_occupancy}  (start {fm.initial_count})",
+                        (10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.7, green, 2)
+            y += 30
+        if fm.growth_rate is None:
+            growth_text = "R(t): warming up"
+        else:
+            growth_text = f"R(t): {fm.growth_rate:+.1f} people/min  (over {fm.growth_window_sec:g}s)"
+        cv2.putText(frame, growth_text, (10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.7, green, 2)
 
         

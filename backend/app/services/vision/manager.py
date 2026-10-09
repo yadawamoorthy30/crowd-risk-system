@@ -9,6 +9,7 @@ from app.services.vision.config import SNAPSHOT_INTERVAL_SECONDS, VisionConfig
 from app.services.vision.results import FrameResult
 from app.services.vision.video_processor import VideoProcessor
 from app.services.vision.metrics import MonitorArea
+from app.services.vision.flow import TripwireLine
 
 
 class SessionAlreadyRunning(Exception):
@@ -38,7 +39,8 @@ class DetectionManager:
         self._lock = threading.Lock()
 
     def start(self, camera_id: int, source: str, config: VisionConfig,
-              monitor: Optional[MonitorArea] = None) -> DetectionSession:
+              monitor: Optional[MonitorArea] = None,
+              tripwire: Optional[TripwireLine] = None) -> DetectionSession:
         with self._lock:
             existing = self._sessions.get(camera_id)
             if existing and existing.thread and existing.thread.is_alive():
@@ -63,6 +65,7 @@ class DetectionManager:
             session.processor = VideoProcessor(
                 source, config=config, show_window=False, on_result=on_result,
                 monitor=monitor,
+                tripwire=tripwire,
             )
             
             session.run_id = persistence.create_run(camera_id, config)

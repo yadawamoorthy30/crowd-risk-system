@@ -1,3 +1,4 @@
+from app.services.vision.flow_metrics import FlowMetrics
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import List, Optional
@@ -37,6 +38,7 @@ class FrameResult:
     frame_width: int = 0    # size of the processed frame the boxes refer to
     frame_height: int = 0
     metrics: Optional[FrameMetrics] = None
+    flow: Optional[FlowMetrics] = None
 
     @property
     def people_detected(self) -> int:

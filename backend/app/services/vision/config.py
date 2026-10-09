@@ -23,3 +23,6 @@ class VisionConfig:
     realtime: bool = False        # True = also drop frames when we fall behind
     history_length: int = 30      # positions kept per track
     smoothing_seconds: float = 5.0  # window for the N(t) / D(t) moving average
+    initial_count: int = 0           # people already inside when detection starts
+    flow_window_sec: float = 60.0    # rolling window for IN/OUT and net flow F(t)
+    growth_window_sec: float = 60.0  # dt for R(t); minimum 10 s
