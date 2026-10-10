@@ -31,6 +31,9 @@ class DetectionSession:
     last_saved_at: float = 0.0
     snapshots_saved: int = 0
     db_errors: int = 0
+    last_heatmap_at: float = 0.0
+    heatmaps_saved: int = 0
+    heatmap_errors: int = 0
 
 
 class DetectionManager:
@@ -60,6 +63,25 @@ class DetectionManager:
                     except Exception as error:
                         session.db_errors += 1
                         print(f"Could not save snapshot for run {session.run_id}: {error}")
+
+                interval = config.heatmap_save_interval_sec
+                if interval > 0 and session.processor is not None:
+                    if session.last_heatmap_at == 0.0:
+                        session.last_heatmap_at = now     # first frame: nothing to show yet
+                    elif now - session.last_heatmap_at >= interval:
+                        session.last_heatmap_at = now
+                        try:
+                            persistence.save_heatmap(
+                                session.camera_id,
+                                session.processor.heatmap,
+                                config.heatmap_save_mode,
+                                session.processor.frame_width,
+                                session.processor.frame_height,
+                            )
+                            session.heatmaps_saved += 1
+                        except Exception as error:
+                            session.heatmap_errors += 1
+                            print(f"Could not save heatmap for run {session.run_id}: {error}")
 
             # Build the detector first: a missing model fails here, before any run row exists
             session.processor = VideoProcessor(

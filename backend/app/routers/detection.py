@@ -53,6 +53,8 @@ def _to_status(session) -> DetectionStatusResponse:
         db_errors=session.db_errors,
         error=session.error,
         flow=_flow_out(p),
+        heatmaps_saved=session.heatmaps_saved,
+        heatmap_errors=session.heatmap_errors,
     )
 
 
@@ -116,7 +118,11 @@ def start_detection(payload: DetectionStartRequest, db: Session = Depends(get_db
         initial_count=payload.initial_count,
         flow_window_sec=payload.flow_window_sec,
         growth_window_sec=payload.growth_window_sec,
+        occupancy_min_difference=payload.occupancy_min_difference,
+        heatmap_save_interval_sec=payload.heatmap_save_interval_sec,
+        heatmap_save_mode=payload.heatmap_save_mode,
     )
+    
     try:
         session = detection_manager.start(
             camera.id, camera.source_path, config, _build_monitor(camera),

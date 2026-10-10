@@ -31,3 +31,5 @@ class VisionConfig:
     heatmap_window_min: int = 5     # window mode: 1, 5, 15 or 30 minutes (FR-HMP-002)
     occupancy_tolerance_pct: float = 30.0
     occupancy_min_difference: float = 3.0
+    heatmap_save_interval_sec: int = 60     # seconds between saved heatmaps; 0 = off (FR-HMP-004)
+    heatmap_save_mode: str = "window"       # which heatmap is saved: "window" or "instant"

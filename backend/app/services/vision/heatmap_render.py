@@ -51,3 +51,28 @@ def draw_legend(frame, title: str, detail: str):
     cv2.putText(frame, "high", (x0 - 50, y0 + 14), FONT, 0.5, WHITE, 1)
     cv2.putText(frame, "low", (x0 - 42, y0 + bar_h), FONT, 0.5, WHITE, 1)
     return frame
+
+def heatmap_image_size(frame_w: int, frame_h: int, target_w: int = 640):
+    """Size of the saved picture: target_w wide, same aspect ratio as the video."""
+    if frame_w <= 0 or frame_h <= 0:
+        return target_w, round(target_w * 9 / 16)
+    return target_w, max(1, round(target_w * frame_h / frame_w))
+
+
+def render_heatmap_image(norm, width: int, height: int, title: str, detail: str):
+    """Heatmap-only picture on a BLACK background.
+
+    No camera frame is used, so no identifiable person can end up in a saved
+    image (SRS 8.1.8, privacy).
+    """
+    image = np.zeros((height, width, 3), dtype=np.uint8)
+    overlay_heatmap(image, norm, alpha=1.0)
+    draw_legend(image, title, detail)
+    return image
+
+
+def encode_png(image) -> bytes:
+    ok, buffer = cv2.imencode(".png", image)
+    if not ok:
+        raise RuntimeError("Could not encode the heatmap image")
+    return buffer.tobytes()

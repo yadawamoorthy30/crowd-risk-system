@@ -14,6 +14,9 @@ class DetectionStartRequest(BaseModel):
     initial_count: int = Field(0, ge=0, le=100000)      # people already inside at start
     flow_window_sec: int = Field(60, ge=10, le=600)     # rolling window for F(t)
     growth_window_sec: int = Field(60, ge=10, le=600)   # dt for R(t), minimum 10 s
+    occupancy_min_difference: float = Field(3.0, ge=0, le=1000)
+    heatmap_save_interval_sec: int = Field(60, ge=0, le=3600)   # 0 = do not save; 5+ recommended
+    heatmap_save_mode: str = Field("window", pattern="^(window|instant)$")
 
 
 class DetectionStopRequest(BaseModel):
@@ -55,6 +58,8 @@ class DetectionStatusResponse(BaseModel):
     db_errors: int = 0
     error: Optional[str] = None
     flow: Optional[FlowOut] = None
+    heatmaps_saved: int = 0
+    heatmap_errors: int = 0
 
 
 class BBox(BaseModel):
